@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 132" width="1200" height="132" role="img" aria-label="The usage band: context 39%, 5-hour 41% resetting in 1h33m, 7-day 93% resetting in 2d3h, 22 points ahead of an even week">
+<style>.t{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:15px}.b{font-weight:700}</style>
+<rect width="1200" height="132" rx="14" fill="#0e0f11"/>
+<rect x="28" y="34" width="1144" height="64" rx="12" fill="#1a1b1e"/>
+<text class="t" x="52" y="72" fill="#8a8d93">ctx</text>
+<text class="t" x="88" y="72" fill="#6aa9e0">▰▰▰▱▱▱▱▱</text>
+<text class="t b" x="169" y="72" fill="#ecebe8">39%</text>
+<text class="t" x="223" y="72" fill="#8a8d93">5h</text>
+<text class="t" x="250" y="72" fill="#6aa9e0">▰▰▰▱▱▱▱▱</text>
+<text class="t b" x="331" y="72" fill="#ecebe8">41%</text>
+<text class="t" x="367" y="72" fill="#8a8d93">↻ 1h33m</text>
+<text class="t" x="457" y="72" fill="#8a8d93">7d</text>
+<text class="t" x="484" y="72" fill="#e06c6c">▰▰▰▰▰▰▰▱</text>
+<text class="t b" x="565" y="72" fill="#ecebe8">93%</text>
+<text class="t" x="601" y="72" fill="#8a8d93">↻ 2d3h</text>
+<text class="t" x="664" y="72" fill="#d9a441">+22 pace</text>
+<rect x="1088" y="50" width="64" height="32" rx="8" fill="#2a2b2f"/>
+<text class="t" x="1120" y="71" fill="#ecebe8" text-anchor="middle">Hide</text>
+</svg>

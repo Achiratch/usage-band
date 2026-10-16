@@ -1,1 +1,1 @@
-{ "name": "usage-band", "version": "0.2.0", "description": "Live 5h / 7d usage limits and context fill in a band above the prompt, with toasts at 80% and 90%", "author": { "name": "Achiratch" }, "types": "./types/index.d.ts" }
+{ "name": "usage-band", "version": "0.3.0", "description": "Live 5h / 7d usage limits and context fill in a band above the prompt, with toasts at 80% and 90%", "author": { "name": "Achiratch" }, "types": "./types/index.d.ts" }

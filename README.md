@@ -1,38 +1,41 @@
-# usage-band
+<img src="assets/banner.svg" width="100%" alt="usage-band: pauses Claude Code before it hits a usage limit, then picks up where it left off after the reset" />
 
-A Claude Code mod: a band above the prompt with live context fill and 5-hour / 7-day usage limits
-(bar, %, time to reset), coloured green / yellow / red, plus a toast at 80% and 90% once per window.
+Your Claude Code usage, live above the prompt. When a limit gets close, usage-band holds the agent, waits for the reset, and picks the task back up.
 
-It also **pauses work before you hit the limit** and picks it up again after the reset.
+<img src="assets/band.svg" width="100%" alt="The band: context 39%, 5-hour 41%, 7-day 93% with a pace warning" />
 
-## Pause and resume
+## What it does
 
-- When a window reaches the pause threshold (default **95%**), every tool call is denied with a note telling
-  Claude to stop and say where it got to. The band shows **⏸ paused** with a Resume button.
-- **5-hour window:** a timer waits until the window resets (plus one minute), keeps the Mac from idle-sleeping
-  meanwhile (`caffeinate -i`), then sends Claude *"continue the task you were working on"*.
-- **7-day or spend window:** the reset can be days away, so it pauses and waits for you instead.
-- Once a window has been resumed it never pauses again in that same window.
-
-The Claude app must stay open and the Mac awake (lid open) for the automatic continue to fire.
-
-## Commands
-
-| Command | What it does |
-| --- | --- |
-| `/usage-band` | Show or hide the band |
-| `/usage-band status` | Print the meters, the threshold and any pause as text (works on any window) |
-| `/usage-band pause-at <1-100>` | Set the pause threshold, kept across sessions |
-| `/usage-band resume` | Lift the pause now and ask Claude to continue |
-| `/usage-band cancel` | Lift the pause without sending anything |
-
-Figures come from Claude Code itself (`$.session.usage()` / `session.measure`), the same ones the status line gets.
-Rate limits show for Pro/Max after the first reply of a session.
+- **Live meters** for the context window and the 5-hour and 7-day limits, with the time left to each reset.
+- **Pauses before the limit** (95% by default). Tool calls are held and Claude says where it stopped, instead of being cut off mid-task.
+- **Continues after the reset.** For the 5-hour window it waits for the reset, keeps the Mac awake meanwhile, then asks Claude to carry on. The 7-day window can be days away, so it waits for you.
+- **Forecasts the limit.** `95% in 38m` appears when your current pace reaches the pause line before the window resets, and `+22 pace` when the week is running ahead of an even spend.
 
 ## Install
 
-    /plugin install usage-band --marketplace Achiratch/usage-band
+```
+/plugin install usage-band --marketplace Achiratch/usage-band
+```
 
-From a local folder, for one session:
+Needs Claude Code 2.1.275 or later. The 5-hour and 7-day meters show on Pro and Max plans after the first reply of a session.
 
-    claude --plugin-dir /path/to/usage-band
+## Commands
+
+| Command | |
+| --- | --- |
+| `/usage-band` | Show or hide the band |
+| `/usage-band status` | Meters, forecast, threshold and look, as text |
+| `/usage-band pause-at <1-100>` | Set the pause threshold |
+| `/usage-band resume` | Lift a pause and ask Claude to continue |
+| `/usage-band cancel` | Lift a pause without sending anything |
+| `/usage-band theme mono\|classic` | One accent colour, or green, amber and red |
+| `/usage-band accent <#rrggbb\|default>` | The accent colour for `mono` |
+| `/usage-band compact` | Percentages only, on one short line |
+
+Settings hold across sessions.
+
+## Good to know
+
+- The automatic continue needs the Claude app open and the Mac awake. `caffeinate` stops idle sleep, but closing the lid still sleeps.
+- Each session decides on its own, even though sessions share one quota.
+- The figures come from Claude Code itself. Nothing leaves your machine.

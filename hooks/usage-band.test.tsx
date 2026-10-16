@@ -46,7 +46,8 @@ for (const surface of ['terminal', 'desktop'] as const) {
     on('session.measure', ($, e) => ({ changed: e.changed }))
     on('ui.status', () => ({ value: undefined }) as never)
     on('ui.render', ($, e) => { const { Box } = $.ui.resolve(e); return <Box key="engine" /> })
-    mock.clock(on, { now: NOW })
+    mock.store(on)
+  mock.clock(on, { now: NOW })
 
     await $.session.measure(measure(23, 41))
     const ui = await $.ui.mount({ plugin: 'usage-band', surface, component: 'AbovePrompt', props: PROPS })
@@ -77,6 +78,7 @@ test('band stays out of the way before any reading', async ($, on) => {
   on('session.measure', ($, e) => ({ changed: e.changed }))
   on('ui.status', () => ({ value: undefined }) as never)
   on('ui.render', ($, e) => { const { Box } = $.ui.resolve(e); return <Box key="engine" /> })
+  mock.store(on)
   mock.clock(on, { now: NOW })
   await $.session.measure({ context: { window: 200_000 }, rateLimits: [], changed: ['context'] })
   const ui = await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })

@@ -1,9 +1,10 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, SessionRateLimit, SessionContextUsage, Timer } from 'claude-code'
 
-import type { Meter, Pause, Snapshot, Warned } from '../types'
+import type { Look, Meter, Pause, Snapshot, Trail, Warned } from '../types'
 
 const snapshot = atom({ plugin: 'usage-band', key: 'snapshot' } as const, null)
+const trails = atom({ plugin: 'usage-band', key: 'trails' } as const, {})
 const warned = atom({ plugin: 'usage-band', key: 'warned' } as const, {})
 const isHidden = atom({ plugin: 'usage-band', key: 'isHidden' } as const, false)
 const paused = atom({ plugin: 'usage-band', key: 'paused' } as const, null)
@@ -22,6 +23,69 @@ export const CONTINUE_PROMPT =
 
 /** green < 60 ≤ yellow < 85 ≤ red, as theme keys so they follow light/dark */
 export const tone = (p: number) => (p >= 85 ? 'error' : p >= 60 ? 'warning' : 'success')
+
+export const DEFAULT_ACCENT = '#6aa9e0'
+export const DEFAULT_LOOK: Look = { theme: 'mono', accent: DEFAULT_ACCENT, compact: false }
+const HEX = /^#[0-9a-f]{6}$/i
+const look = atom({ plugin: 'usage-band', key: 'look' } as const, DEFAULT_LOOK)
+
+export const lookOf = async ($: EngineInterface): Promise<Look> => {
+  const v = (await $.store.get('look')) as Partial<Look> | undefined
+  return {
+    theme: v?.theme === 'classic' ? 'classic' : 'mono',
+    accent: typeof v?.accent === 'string' && HEX.test(v.accent) ? v.accent : DEFAULT_ACCENT,
+    compact: v?.compact === true,
+  }
+}
+
+/** mono: one accent until a meter nears the pause line, then red; classic: traffic light */
+export const colorOf = (p: number, look: Look, pauseAt: number) =>
+  look.theme === 'classic' ? tone(p) : p >= Math.min(pauseAt - 10, 85) ? 'error' : look.accent
+
+const WINDOW_MS: Record<string, number> = { five_hour: 5 * 3_600_000, seven_day: 7 * 86_400_000 }
+/** readings older than this no longer say much about the current pace */
+export const TRAIL_MS = 90 * 60_000
+/** a forecast needs at least this much history behind it */
+export const MIN_SPAN_MS = 10 * 60_000
+
+/** add a reading to a window's trail; a new window (resetsAt moved) starts a fresh one */
+export const record = (t: Trail | undefined, m: Meter, now: number): Trail => {
+  const resetsAt = m.resetsAt ?? ''
+  const kept = t && t.resetsAt === resetsAt ? t.samples.filter(([at]) => now - at <= TRAIL_MS) : []
+  const last = kept[kept.length - 1]
+  if (last && last[1] === m.percent && now - last[0] < 60_000) return { resetsAt, samples: kept }
+  return { resetsAt, samples: [...kept, [now, m.percent]] }
+}
+
+/** ms until the trail's pace reaches `target`, or undefined while there is too little to go on */
+export const eta = (samples: [number, number][], target: number) => {
+  const first = samples[0]
+  const last = samples[samples.length - 1]
+  if (!first || !last || first === last) return undefined
+  const [t0, p0] = first
+  const [t1, p1] = last
+  if (t1 - t0 < MIN_SPAN_MS || p1 <= p0 || p1 >= target) return undefined
+  return ((target - p1) * (t1 - t0)) / (p1 - p0)
+}
+
+/** points ahead of (+) or behind (-) an even spend across the window */
+export const pace = (m: Meter, now: number) => {
+  const span = WINDOW_MS[m.kind]
+  if (!span || !m.resetsAt) return undefined
+  const elapsed = Math.min(1, Math.max(0, 1 - (Date.parse(m.resetsAt) - now) / span))
+  return Math.round(m.percent - elapsed * 100)
+}
+
+/** "38m", "2h05m": a duration in the reset countdown's own format */
+export const span = (ms: number, now: number) => left(new Date(now + ms).toISOString(), now)
+
+/** the forecast worth showing for a meter: reaches the pause line before its window resets */
+export const forecast = (m: Meter, t: Trail | undefined, pauseAt: number, now: number) => {
+  if (!t || !m.resetsAt) return undefined
+  const ms = eta(t.samples, pauseAt)
+  if (ms === undefined || now + ms >= Date.parse(m.resetsAt)) return undefined
+  return ms
+}
 
 export const bar = (p: number, w = WIDTH) => {
   const filled = Math.max(0, Math.min(w, Math.round((Math.min(p, 100) / 100) * w)))
@@ -137,7 +201,7 @@ async function pause($: EngineInterface, p: Pause) {
   await update($, paused, () => p)
   const now = await $.clock.now()
   const tail = p.auto ? `continues automatically in ${left(p.resetsAt, now)}` : 'run /usage-band resume to continue'
-  $.ui.toast(`⏸ ${labelOf(p.kind)} usage at ${p.percent}% — work paused; ${tail}`, { timeoutMs: 10_000 })
+  $.ui.toast(`⏸ ${labelOf(p.kind)} usage at ${p.percent}%, work paused: ${tail}`, { timeoutMs: 10_000 })
   await arm($, p)
 }
 
@@ -156,6 +220,12 @@ async function resume($: EngineInterface, send: boolean) {
 
 async function refresh($: EngineInterface, snap: Snapshot) {
   await update($, snapshot, () => snap)
+  const at = await $.clock.now()
+  await update($, trails, prev => {
+    const next: Record<string, Trail> = {}
+    for (const m of snap.meters) next[m.kind] = record(prev[m.kind], m, at)
+    return next
+  })
   const text = summary(snap, await $.clock.now())
   $.ui.status(text === '' ? undefined : text)
 
@@ -163,7 +233,7 @@ async function refresh($: EngineInterface, snap: Snapshot) {
   for (const m of snap.meters) {
     const t = due(m, w)
     if (t === undefined) continue
-    const tail = m.resetsAt ? ` — resets in ${left(m.resetsAt, await $.clock.now())}` : ''
+    const tail = m.resetsAt ? `, resets in ${left(m.resetsAt, await $.clock.now())}` : ''
     $.ui.toast(`${t >= 90 ? '🔴' : '🟡'} ${labelOf(m.kind)} usage at ${m.percent}%${tail}`)
     await update($, warned, prev => ({ ...prev, [m.kind]: `${t}@${m.resetsAt ?? ''}` }))
   }
@@ -176,13 +246,15 @@ async function refresh($: EngineInterface, snap: Snapshot) {
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const r = await next(e)
+    const stored = await lookOf($)
+    await update($, look, () => stored)
     const u = await $.session.usage()
     await refresh($, toSnapshot(u.context, u.rateLimits))
     const held = await read($, paused)
     if (held) await arm($, held)
     await $.command.register({
       name: 'usage-band',
-      description: 'Usage band: status · pause-at <N> · resume · cancel · (no args) toggle the band',
+      description: 'Usage band: status · pause-at <N> · resume · cancel · theme mono|classic · accent <#hex> · compact · (no args) toggle',
     })
     return r
   })
@@ -207,6 +279,20 @@ export const register: Register = on => {
       await $.store.set('pauseAt', n)
       return { text: `usage-band pauses work at ${n}% from now on (every session).` }
     }
+    if (cmd === 'theme' || cmd === 'accent' || cmd === 'compact') {
+      const l = { ...(await lookOf($)) }
+      if (cmd === 'theme') {
+        if (arg !== 'mono' && arg !== 'classic') return { text: `Usage: /usage-band theme mono|classic (now ${l.theme})` }
+        l.theme = arg
+      } else if (cmd === 'accent') {
+        if (arg === 'default') l.accent = DEFAULT_ACCENT
+        else if (arg && HEX.test(arg)) l.accent = arg.toLowerCase()
+        else return { text: `Usage: /usage-band accent <#rrggbb|default> (now ${l.accent})` }
+      } else l.compact = !l.compact
+      await $.store.set('look', l)
+      await update($, look, () => l)
+      return { text: `usage-band look: ${l.theme}, accent ${l.accent}${l.compact ? ', compact' : ''} (every session).` }
+    }
     if (cmd === 'resume') {
       return { text: (await resume($, true)) ? 'Pause lifted; asking Claude to continue.' : 'Nothing is paused.' }
     }
@@ -223,15 +309,25 @@ export const register: Register = on => {
       const dot = (p: number) => (p >= 85 ? '🔴' : p >= 60 ? '🟡' : '🟢')
       const lines: string[] = []
       if (live.context !== undefined) lines.push(`${dot(live.context)} ctx  ${bar(live.context, 10)} ${live.context}%`)
+      const tr = await read($, trails)
+      const at = await pauseAtOf($)
       for (const m of live.meters) {
         const r = left(m.resetsAt, now)
-        lines.push(`${dot(m.percent)} ${labelOf(m.kind).padEnd(3)} ${bar(m.percent, 10)} ${m.percent}%${r ? `  ↻ ${r}` : ''}`)
+        const f = forecast(m, tr[m.kind], at, now)
+        const pc = m.kind === 'seven_day' ? pace(m, now) : undefined
+        lines.push(
+          `${dot(m.percent)} ${labelOf(m.kind).padEnd(3)} ${bar(m.percent, 10)} ${m.percent}%${r ? `  ↻ ${r}` : ''}` +
+            (f !== undefined ? `  · ${at}% in ${span(f, now)} at this pace` : '') +
+            (pc !== undefined ? `  · ${pc > 0 ? `${pc} pts ahead of` : `${-pc} pts under`} an even week` : ''),
+        )
       }
+      const l = await read($, look)
+      lines.push(`look: ${l.theme}, accent ${l.accent}${l.compact ? ', compact' : ''}`)
       if (live.meters.length === 0) lines.push('rate limits: none reported yet (needs Pro/Max and one reply in this session)')
       const p = await read($, paused)
       lines.push(
         p
-          ? `⏸ paused: ${labelOf(p.kind)} at ${p.percent}% — ${p.auto ? `continues in ${left(p.resetsAt, now)}` : 'waiting for /usage-band resume'}`
+          ? `⏸ paused: ${labelOf(p.kind)} at ${p.percent}%, ${p.auto ? `continues in ${left(p.resetsAt, now)}` : 'waiting for /usage-band resume'}`
           : `pause threshold: ${await pauseAtOf($)}%`,
       )
       if (surfaces.length === 0) lines.push('(this window draws no mod UI; the live band shows in Claude Code)')
@@ -252,6 +348,26 @@ export const register: Register = on => {
     }
     const now = await $.clock.now()
     const held = await read($, paused)
+    const l = await read($, look)
+    const at = await pauseAtOf($)
+    const tr = await read($, trails)
+    const col = (p: number) => colorOf(p, l, at)
+
+    if (l.compact) {
+      return (
+        <Box key="compact" flexDirection="row" columnGap={2} alignItems="center">
+          {held ? <Text color="error" bold>⏸</Text> : null}
+          {snap.context !== undefined ? <Text key="ctx" dimColor>ctx {snap.context}%</Text> : null}
+          {snap.meters.map(m => (
+            <Box key={m.kind} flexDirection="row" gap={1}>
+              <Text dimColor>{labelOf(m.kind)}</Text>
+              <Text color={col(m.percent)} bold>{m.percent}%</Text>
+            </Box>
+          ))}
+          {held ? <Button key="resume" label="Resume" onPress={() => void resume($, true)} /> : null}
+        </Box>
+      )
+    }
 
     const parts = []
     if (held) {
@@ -266,19 +382,23 @@ export const register: Register = on => {
       parts.push(
         <Box key="ctx" flexDirection="row" gap={1}>
           <Text dimColor>ctx</Text>
-          <Text color={tone(snap.context)}>{bar(snap.context)}</Text>
+          <Text color={l.theme === 'classic' ? tone(snap.context) : l.accent}>{bar(snap.context)}</Text>
           <Text bold>{snap.context}%</Text>
         </Box>,
       )
     }
     for (const m of snap.meters) {
       const reset = left(m.resetsAt, now)
+      const f = held ? undefined : forecast(m, tr[m.kind], at, now)
+      const pc = m.kind === 'seven_day' ? pace(m, now) : undefined
       parts.push(
         <Box key={m.kind} flexDirection="row" gap={1}>
           <Text dimColor>{labelOf(m.kind)}</Text>
-          <Text color={tone(m.percent)}>{bar(m.percent)}</Text>
+          <Text color={col(m.percent)}>{bar(m.percent)}</Text>
           <Text bold>{m.percent}%</Text>
           {reset ? <Text dimColor>↻ {reset}</Text> : null}
+          {f !== undefined ? <Text color="warning">{at}% in {span(f, now)}</Text> : null}
+          {f === undefined && pc !== undefined && pc >= 10 ? <Text color="warning">+{pc} pace</Text> : null}
         </Box>,
       )
     }
