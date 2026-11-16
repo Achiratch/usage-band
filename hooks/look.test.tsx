@@ -1,7 +1,7 @@
 import { test, expect, mock } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { DEFAULT_LOOK, MIN_SPAN_MS, colorOf, eta, forecast, lookOf, pace, record } from './register'
+import { DEFAULT_LOOK, MIN_SPAN_MS, colorOf, eta, forecast, lookOf, pace, powerSvg, record } from './register'
 
 const NOW = Date.parse('2026-10-15T10:00:00Z')
 const MIN = 60_000
@@ -114,12 +114,23 @@ test('the old default accent stored before 0.4.0 follows the new default; a chos
   expect((await lookOf(stored(undefined))).accent).toBe('#7b7bff')
 })
 
-test('meters: a real bar on a graphical surface, the glyph bar on the terminal', async ($, on) => {
+test('meters: a power cell on a graphical surface, the glyph bar on the terminal', async ($, on) => {
   world(on)
   await $.session.measure(measure(41, 18))
   const desktop = await $.ui.mount({ plugin: 'usage-band', surface: 'desktop', component: 'AbovePrompt', props: PROPS })
-  expect((await desktop.find({ key: 'bar-5h' }))).toBeTruthy()
+  expect(await desktop.find({ key: 'bar-5h' })).toBeTruthy()
   expect((await desktop.find({ key: 'five_hour' }))?.text).not.toContain('▱')
   const terminal = await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
   expect((await terminal.find({ key: 'five_hour' }))?.text).toContain('▱')
+})
+
+test('power cell: lit cells follow the percent, red near the pause line', () => {
+  const lit = (svg: string) => (svg.match(/fill="url\(#f/g) ?? []).length
+  expect(lit(powerSvg(0, false, 'a'))).toBe(0)
+  expect(lit(powerSvg(41, false, 'a'))).toBe(4)
+  expect(lit(powerSvg(100, false, 'a'))).toBe(10)
+  expect(powerSvg(41, false, 'a')).toContain('#d9d8ea')
+  expect(powerSvg(90, true, 'a')).toContain('#ff6b6b')
+  expect(powerSvg(41, false, 'a')).toContain('prefers-reduced-motion')
+  expect(powerSvg(41, false, 'a').length).toBeLessThan(131072)
 })

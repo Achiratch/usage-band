@@ -93,6 +93,42 @@ export const forecast = (m: Meter, t: Trail | undefined, pauseAt: number, now: n
   return ms
 }
 
+/**
+ * A glowing silver power cell for the apps: ten cells fill with a silver
+ * gradient under a soft glow, and a light sweeps across the charge. Near the
+ * pause line the charge turns red. Animation stops under reduced motion.
+ */
+export const powerSvg = (p: number, hot: boolean, id: string) => {
+  const W = 120
+  const H = 18
+  const cells = 10
+  const gap = 2
+  const cw = (W - 4 - gap * (cells - 1)) / cells
+  const lit = Math.max(0, Math.min(cells, Math.round((Math.min(p, 100) / 100) * cells)))
+  const [c0, c1, c2] = hot ? ['#7a1f24', '#ff6b6b', '#ffd2d2'] : ['#77768f', '#d9d8ea', '#ffffff']
+  let rects = ''
+  for (let i = 0; i < cells; i++) {
+    const x = (2 + i * (cw + gap)).toFixed(2)
+    rects += i < lit
+      ? `<rect x="${x}" y="3" width="${cw.toFixed(2)}" height="${H - 6}" rx="1.5" fill="url(#f${id})"/>`
+      : `<rect x="${x}" y="3" width="${cw.toFixed(2)}" height="${H - 6}" rx="1.5" fill="#ffffff" fill-opacity=".07"/>`
+  }
+  const end = (2 + lit * (cw + gap) - gap).toFixed(2)
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">
+<defs><linearGradient id="f${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${c2}"/><stop offset=".5" stop-color="${c1}"/><stop offset="1" stop-color="${c0}"/></linearGradient>
+<linearGradient id="s${id}" x1="0" x2="1"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".5" stop-color="#fff" stop-opacity=".85"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+<filter id="g${id}" x="-20%" y="-120%" width="140%" height="340%"><feGaussianBlur stdDeviation="2.2"/></filter>
+<clipPath id="c${id}"><rect x="2" y="3" width="${lit ? end : 0}" height="${H - 6}"/></clipPath></defs>
+<style>.glow{animation:breathe 2.8s ease-in-out infinite}.sweep{animation:sweep 2.4s ease-in-out infinite}
+@keyframes breathe{0%,100%{opacity:.45}50%{opacity:.9}}@keyframes sweep{0%{transform:translateX(-40px)}100%{transform:translateX(${W}px)}}
+@media (prefers-reduced-motion:reduce){.glow,.sweep{animation:none}}</style>
+<rect x=".5" y=".5" width="${W - 1}" height="${H - 1}" rx="4" fill="#07061a" stroke="${hot ? '#ff6b6b' : '#c9c8d9'}" stroke-opacity=".28"/>
+${lit ? `<g class="glow" filter="url(#g${id})"><rect x="2" y="3" width="${end}" height="${H - 6}" rx="2" fill="${c1}" fill-opacity=".9"/></g>` : ''}
+${rects}
+<g clip-path="url(#c${id})"><rect class="sweep" x="0" y="2" width="36" height="${H - 4}" fill="url(#s${id})"/></g>
+</svg>`
+}
+
 export const bar = (p: number, w = WIDTH) => {
   const filled = Math.max(0, Math.min(w, Math.round((Math.min(p, 100) / 100) * w)))
   return '▰'.repeat(filled) + '▱'.repeat(w - filled)
@@ -360,8 +396,16 @@ export const register: Register = on => {
     const col = (p: number) => colorOf(p, l, at)
     // A graphical surface draws a real bar; the terminal keeps the glyph bar, which reads in any font.
     const graphical = e.surface !== 'terminal'
+    const hot = (p: number) => p >= Math.min(at - 10, 85)
+    const ui = $.ui.resolve(e)
+    // The terminal has no Svg; there the glyph bar is drawn.
+    const Svg = 'Svg' in ui ? ui.Svg : undefined
     const meter = (name: string, p: number, color: string) =>
-      graphical ? (
+      graphical && Svg ? (
+        <Box key={`bar-${name}`} flexShrink={0}>
+          <Svg source={powerSvg(p, hot(p), name.replace(/\W/g, ''))} alt={`${name} ${p}%`} width={120} height={18} isInteractive />
+        </Box>
+      ) : graphical ? (
         <Box key={`bar-${name}`} width={WIDTH + 2} flexShrink={0}>
           <Progress label={`${name} ${p}%`} value={Math.min(p, 100)} max={100} valueText={`${p}%`} color={color} />
         </Box>
