@@ -1,7 +1,7 @@
 import { test, expect, mock } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { DEFAULT_LOOK, MIN_SPAN_MS, colorOf, eta, forecast, pace, record } from './register'
+import { DEFAULT_LOOK, MIN_SPAN_MS, colorOf, eta, forecast, lookOf, pace, record } from './register'
 
 const NOW = Date.parse('2026-10-15T10:00:00Z')
 const MIN = 60_000
@@ -33,8 +33,8 @@ const say = async ($: { command: { run: (a: never) => Promise<unknown> } }, args
 
 test('colors: mono keeps one accent until near the pause line; classic is a traffic light', () => {
   const mono = DEFAULT_LOOK
-  expect(colorOf(41, mono, 95)).toBe('#6aa9e0')
-  expect(colorOf(84, mono, 95)).toBe('#6aa9e0')
+  expect(colorOf(41, mono, 95)).toBe('#7b7bff')
+  expect(colorOf(84, mono, 95)).toBe('#7b7bff')
   expect(colorOf(85, mono, 95)).toBe('error')
   expect(colorOf(72, mono, 80)).toBe('error')
   expect(colorOf(41, { ...mono, accent: '#e07a5f' }, 95)).toBe('#e07a5f')
@@ -85,7 +85,7 @@ test('theme, accent and compact persist and validate', async ($, on) => {
   expect(await say($, 'accent #E07A5F')).toContain('#e07a5f')
   expect(await say($, 'compact')).toContain('compact')
   expect(await say($, 'status')).toContain('look: classic, accent #e07a5f, compact')
-  expect(await say($, 'accent default')).toContain('#6aa9e0')
+  expect(await say($, 'accent default')).toContain('#7b7bff')
 })
 
 for (const surface of ['terminal', 'desktop'] as const) {
@@ -106,3 +106,20 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect((await c.find({ key: 'five_hour' }))?.text).not.toContain('▰')
   })
 }
+
+test('the old default accent stored before 0.4.0 follows the new default; a chosen one stays', async () => {
+  const stored = (look: unknown) => ({ store: { get: async () => look } }) as never
+  expect((await lookOf(stored({ theme: 'mono', accent: '#6AA9E0', compact: false }))).accent).toBe('#7b7bff')
+  expect((await lookOf(stored({ theme: 'mono', accent: '#e07a5f', compact: false }))).accent).toBe('#e07a5f')
+  expect((await lookOf(stored(undefined))).accent).toBe('#7b7bff')
+})
+
+test('meters: a real bar on a graphical surface, the glyph bar on the terminal', async ($, on) => {
+  world(on)
+  await $.session.measure(measure(41, 18))
+  const desktop = await $.ui.mount({ plugin: 'usage-band', surface: 'desktop', component: 'AbovePrompt', props: PROPS })
+  expect((await desktop.find({ key: 'bar-5h' }))).toBeTruthy()
+  expect((await desktop.find({ key: 'five_hour' }))?.text).not.toContain('▱')
+  const terminal = await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+  expect((await terminal.find({ key: 'five_hour' }))?.text).toContain('▱')
+})

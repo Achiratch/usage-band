@@ -24,7 +24,10 @@ export const CONTINUE_PROMPT =
 /** green < 60 ≤ yellow < 85 ≤ red, as theme keys so they follow light/dark */
 export const tone = (p: number) => (p >= 85 ? 'error' : p >= 60 ? 'warning' : 'success')
 
-export const DEFAULT_ACCENT = '#6aa9e0'
+/** an electric periwinkle: reads on deep navy and on charcoal alike */
+export const DEFAULT_ACCENT = '#7b7bff'
+/** the accent before 0.4.0; a stored copy of it means "the default", so it follows the new one */
+const OLD_DEFAULT_ACCENT = '#6aa9e0'
 export const DEFAULT_LOOK: Look = { theme: 'mono', accent: DEFAULT_ACCENT, compact: false }
 const HEX = /^#[0-9a-f]{6}$/i
 const look = atom({ plugin: 'usage-band', key: 'look' } as const, DEFAULT_LOOK)
@@ -33,7 +36,10 @@ export const lookOf = async ($: EngineInterface): Promise<Look> => {
   const v = (await $.store.get('look')) as Partial<Look> | undefined
   return {
     theme: v?.theme === 'classic' ? 'classic' : 'mono',
-    accent: typeof v?.accent === 'string' && HEX.test(v.accent) ? v.accent : DEFAULT_ACCENT,
+    accent:
+      typeof v?.accent === 'string' && HEX.test(v.accent) && v.accent.toLowerCase() !== OLD_DEFAULT_ACCENT
+        ? v.accent
+        : DEFAULT_ACCENT,
     compact: v?.compact === true,
   }
 }
@@ -341,7 +347,7 @@ export const register: Register = on => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const snap = await read($, snapshot)
     if (e.props.hasSurvey || snap === null || (await read($, isHidden))) return next(e)
-    const { Box, Text, Button } = $.ui.resolve(e)
+    const { Box, Text, Button, Progress } = $.ui.resolve(e)
 
     if (snap.context === undefined && snap.meters.length === 0) {
       return <Box key="wait"><Text dimColor>usage · waiting for the first reading</Text></Box>
@@ -352,6 +358,16 @@ export const register: Register = on => {
     const at = await pauseAtOf($)
     const tr = await read($, trails)
     const col = (p: number) => colorOf(p, l, at)
+    // A graphical surface draws a real bar; the terminal keeps the glyph bar, which reads in any font.
+    const graphical = e.surface !== 'terminal'
+    const meter = (name: string, p: number, color: string) =>
+      graphical ? (
+        <Box key={`bar-${name}`} width={WIDTH + 2} flexShrink={0}>
+          <Progress label={`${name} ${p}%`} value={Math.min(p, 100)} max={100} valueText={`${p}%`} color={color} />
+        </Box>
+      ) : (
+        <Text key={`bar-${name}`} color={color}>{bar(p)}</Text>
+      )
 
     if (l.compact) {
       return (
@@ -382,7 +398,7 @@ export const register: Register = on => {
       parts.push(
         <Box key="ctx" flexDirection="row" gap={1}>
           <Text dimColor>ctx</Text>
-          <Text color={l.theme === 'classic' ? tone(snap.context) : l.accent}>{bar(snap.context)}</Text>
+          {meter('ctx', snap.context, l.theme === 'classic' ? tone(snap.context) : l.accent)}
           <Text bold>{snap.context}%</Text>
         </Box>,
       )
@@ -394,7 +410,7 @@ export const register: Register = on => {
       parts.push(
         <Box key={m.kind} flexDirection="row" gap={1}>
           <Text dimColor>{labelOf(m.kind)}</Text>
-          <Text color={col(m.percent)}>{bar(m.percent)}</Text>
+          {meter(labelOf(m.kind), m.percent, col(m.percent))}
           <Text bold>{m.percent}%</Text>
           {reset ? <Text dimColor>↻ {reset}</Text> : null}
           {f !== undefined ? <Text color="warning">{at}% in {span(f, now)}</Text> : null}
