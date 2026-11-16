@@ -1,7 +1,7 @@
 import { test, expect, mock } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { DEFAULT_LOOK, MIN_SPAN_MS, colorOf, eta, forecast, lookOf, pace, powerSvg, record } from './register'
+import { DEFAULT_LOOK, MIN_SPAN_MS, colorOf, eta, forecast, lookOf, meterSvg, pace, record, toneOf } from './register'
 
 const NOW = Date.parse('2026-10-15T10:00:00Z')
 const MIN = 60_000
@@ -33,8 +33,8 @@ const say = async ($: { command: { run: (a: never) => Promise<unknown> } }, args
 
 test('colors: mono keeps one accent until near the pause line; classic is a traffic light', () => {
   const mono = DEFAULT_LOOK
-  expect(colorOf(41, mono, 95)).toBe('#7b7bff')
-  expect(colorOf(84, mono, 95)).toBe('#7b7bff')
+  expect(colorOf(41, mono, 95)).toBe('#5b6cff')
+  expect(colorOf(84, mono, 95)).toBe('#5b6cff')
   expect(colorOf(85, mono, 95)).toBe('error')
   expect(colorOf(72, mono, 80)).toBe('error')
   expect(colorOf(41, { ...mono, accent: '#e07a5f' }, 95)).toBe('#e07a5f')
@@ -85,7 +85,7 @@ test('theme, accent and compact persist and validate', async ($, on) => {
   expect(await say($, 'accent #E07A5F')).toContain('#e07a5f')
   expect(await say($, 'compact')).toContain('compact')
   expect(await say($, 'status')).toContain('look: classic, accent #e07a5f, compact')
-  expect(await say($, 'accent default')).toContain('#7b7bff')
+  expect(await say($, 'accent default')).toContain('#5b6cff')
 })
 
 for (const surface of ['terminal', 'desktop'] as const) {
@@ -109,28 +109,51 @@ for (const surface of ['terminal', 'desktop'] as const) {
 
 test('the old default accent stored before 0.4.0 follows the new default; a chosen one stays', async () => {
   const stored = (look: unknown) => ({ store: { get: async () => look } }) as never
-  expect((await lookOf(stored({ theme: 'mono', accent: '#6AA9E0', compact: false }))).accent).toBe('#7b7bff')
+  expect((await lookOf(stored({ theme: 'mono', accent: '#6AA9E0', compact: false }))).accent).toBe('#5b6cff')
   expect((await lookOf(stored({ theme: 'mono', accent: '#e07a5f', compact: false }))).accent).toBe('#e07a5f')
-  expect((await lookOf(stored(undefined))).accent).toBe('#7b7bff')
+  expect((await lookOf(stored(undefined))).accent).toBe('#5b6cff')
 })
 
-test('meters: a power cell on a graphical surface, the glyph bar on the terminal', async ($, on) => {
+test('meters: a thin glowing track on a graphical surface, the glyph bar on the terminal', async ($, on) => {
   world(on)
   await $.session.measure(measure(41, 18))
   const desktop = await $.ui.mount({ plugin: 'usage-band', surface: 'desktop', component: 'AbovePrompt', props: PROPS })
-  expect(await desktop.find({ key: 'bar-5h' })).toBeTruthy()
+  expect(await desktop.find({ key: 'bar-five_hour' })).toBeTruthy()
   expect((await desktop.find({ key: 'five_hour' }))?.text).not.toContain('▱')
   const terminal = await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
   expect((await terminal.find({ key: 'five_hour' }))?.text).toContain('▱')
 })
 
-test('power cell: lit cells follow the percent, red near the pause line', () => {
-  const lit = (svg: string) => (svg.match(/fill="url\(#f/g) ?? []).length
-  expect(lit(powerSvg(0, false, 'a'))).toBe(0)
-  expect(lit(powerSvg(41, false, 'a'))).toBe(4)
-  expect(lit(powerSvg(100, false, 'a'))).toBe(10)
-  expect(powerSvg(41, false, 'a')).toContain('#d9d8ea')
-  expect(powerSvg(90, true, 'a')).toContain('#ff6b6b')
-  expect(powerSvg(41, false, 'a')).toContain('prefers-reduced-motion')
-  expect(powerSvg(41, false, 'a').length).toBeLessThan(131072)
+test('tones: calm, amber from 70, coral from 90 or 5 under a lower pause line', () => {
+  expect(toneOf(69, 95)).toBe('calm')
+  expect(toneOf(70, 95)).toBe('warn')
+  expect(toneOf(89, 95)).toBe('warn')
+  expect(toneOf(90, 95)).toBe('crit')
+  expect(toneOf(75, 80)).toBe('crit')
+  expect(toneOf(74, 80)).toBe('warn')
+})
+
+test('meter: one hue with a bright leading edge, glides from the last reading, coral breathes', () => {
+  const calm = meterSvg({ p: 41, from: 20, tone: 'calm', accent: '#5b6cff', id: 'a', w: 120, h: 4 })
+  expect(calm).toContain('#5b6cff')
+  expect(calm).toContain('scaleX(0.488)')
+  expect(calm).not.toContain('class="breathe"')
+  expect(calm).toContain('prefers-reduced-motion')
+  const crit = meterSvg({ p: 93, from: 93, tone: 'crit', accent: '#5b6cff', id: 'b', w: 120, h: 4 })
+  expect(crit).toContain('#ff5a5f')
+  expect(crit).toContain('class="breathe"')
+  expect(meterSvg({ p: 0, from: 0, tone: 'calm', accent: '#5b6cff', id: 'c', w: 120, h: 4 })).not.toContain('class="edge"')
+  expect(meterSvg({ p: 72, from: 0, tone: 'warn', accent: '#5b6cff', id: 'd', w: 400, h: 8, tick: 70 })).toContain('x="280.0"')
+})
+
+test('details: the band opens a panel with names, tokens and reset times', async ($, on) => {
+  world(on)
+  await $.session.measure(measure(41, 18))
+  const ui = await $.ui.mount({ plugin: 'usage-band', surface: 'desktop', component: 'AbovePrompt', props: PROPS })
+  expect(await ui.find({ key: 'panel' })).toBe(undefined)
+  await ui.press({ key: 'details' })
+  const panel = await ui.find({ key: 'panel' })
+  expect(panel?.text).toContain('Context window')
+  expect(panel?.text).toContain('80k / 200k tokens')
+  expect(panel?.text).toContain('resets in 3h 00m')
 })

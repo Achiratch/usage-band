@@ -9,6 +9,8 @@ const warned = atom({ plugin: 'usage-band', key: 'warned' } as const, {})
 const isHidden = atom({ plugin: 'usage-band', key: 'isHidden' } as const, false)
 const paused = atom({ plugin: 'usage-band', key: 'paused' } as const, null)
 const lastResumed = atom({ plugin: 'usage-band', key: 'lastResumed' } as const, '')
+const isOpen = atom({ plugin: 'usage-band', key: 'isOpen' } as const, false)
+const previous = atom({ plugin: 'usage-band', key: 'previous' } as const, {})
 
 const LABEL: Record<string, string> = { five_hour: '5h', seven_day: '7d', spend_limit: 'spend' }
 const ORDER = ['five_hour', 'seven_day', 'spend_limit']
@@ -24,10 +26,10 @@ export const CONTINUE_PROMPT =
 /** green < 60 ≤ yellow < 85 ≤ red, as theme keys so they follow light/dark */
 export const tone = (p: number) => (p >= 85 ? 'error' : p >= 60 ? 'warning' : 'success')
 
-/** an electric periwinkle: reads on deep navy and on charcoal alike */
-export const DEFAULT_ACCENT = '#7b7bff'
-/** the accent before 0.4.0; a stored copy of it means "the default", so it follows the new one */
-const OLD_DEFAULT_ACCENT = '#6aa9e0'
+/** the redesign's calm blue: one hue that reads on deep navy and on charcoal alike */
+export const DEFAULT_ACCENT = '#5b6cff'
+/** earlier defaults; a stored copy of one means "the default", so it follows the current one */
+const OLD_DEFAULT_ACCENTS = ['#6aa9e0', '#7b7bff']
 export const DEFAULT_LOOK: Look = { theme: 'mono', accent: DEFAULT_ACCENT, compact: false }
 const HEX = /^#[0-9a-f]{6}$/i
 const look = atom({ plugin: 'usage-band', key: 'look' } as const, DEFAULT_LOOK)
@@ -37,7 +39,7 @@ export const lookOf = async ($: EngineInterface): Promise<Look> => {
   return {
     theme: v?.theme === 'classic' ? 'classic' : 'mono',
     accent:
-      typeof v?.accent === 'string' && HEX.test(v.accent) && v.accent.toLowerCase() !== OLD_DEFAULT_ACCENT
+      typeof v?.accent === 'string' && HEX.test(v.accent) && !OLD_DEFAULT_ACCENTS.includes(v.accent.toLowerCase())
         ? v.accent
         : DEFAULT_ACCENT,
     compact: v?.compact === true,
@@ -93,39 +95,58 @@ export const forecast = (m: Meter, t: Trail | undefined, pauseAt: number, now: n
   return ms
 }
 
+/** where the amber step starts, and the most it waits before the coral one */
+export const WARN_AT = 70
+export const CRIT_AT = 90
+
+export type Tone = 'calm' | 'warn' | 'crit'
+/** three steps: calm, amber from 70, coral from 90 (or 5 under the pause line, if that is lower) */
+export const toneOf = (p: number, pauseAt: number): Tone => {
+  const crit = Math.min(CRIT_AT, pauseAt - 5)
+  return p >= crit ? 'crit' : p >= Math.min(WARN_AT, crit - 1) ? 'warn' : 'calm'
+}
+
+const mix = (a: string, b: string, t: number) => {
+  const p = (h: string) => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16))
+  const A = p(a)
+  const B = p(b)
+  return `#${A.map((v, i) => Math.round(v + ((B[i] ?? v) - v) * t).toString(16).padStart(2, '0')).join('')}`
+}
+
+/** base, its light end, and the value text color of each tone */
+export const toneColors = (t: Tone, accent: string) =>
+  t === 'crit'
+    ? { base: '#ff5a5f', light: '#ff9a9d', text: '#ff9a9d' }
+    : t === 'warn'
+      ? { base: '#f5a524', light: '#ffc97a', text: '#ffc97a' }
+      : { base: accent, light: mix(accent, '#ffffff', 0.35), text: undefined }
+
 /**
- * A glowing silver power cell for the apps: ten cells fill with a silver
- * gradient under a soft glow, and a light sweeps across the charge. Near the
- * pause line the charge turns red. Animation stops under reduced motion.
+ * One meter as the redesign draws it: a thin track at 7% white, a single-hue
+ * fill rising in lightness under a soft glow, and a bright 2px leading edge.
+ * The fill glides from the last reading (`from`); coral breathes. Motion stops
+ * under reduced motion. `tick` draws the amber line on the expanded track.
  */
-export const powerSvg = (p: number, hot: boolean, id: string) => {
-  const W = 120
-  const H = 18
-  const cells = 10
-  const gap = 2
-  const cw = (W - 4 - gap * (cells - 1)) / cells
-  const lit = Math.max(0, Math.min(cells, Math.round((Math.min(p, 100) / 100) * cells)))
-  const [c0, c1, c2] = hot ? ['#7a1f24', '#ff6b6b', '#ffd2d2'] : ['#77768f', '#d9d8ea', '#ffffff']
-  let rects = ''
-  for (let i = 0; i < cells; i++) {
-    const x = (2 + i * (cw + gap)).toFixed(2)
-    rects += i < lit
-      ? `<rect x="${x}" y="3" width="${cw.toFixed(2)}" height="${H - 6}" rx="1.5" fill="url(#f${id})"/>`
-      : `<rect x="${x}" y="3" width="${cw.toFixed(2)}" height="${H - 6}" rx="1.5" fill="#ffffff" fill-opacity=".07"/>`
-  }
-  const end = (2 + lit * (cw + gap) - gap).toFixed(2)
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">
-<defs><linearGradient id="f${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${c2}"/><stop offset=".5" stop-color="${c1}"/><stop offset="1" stop-color="${c0}"/></linearGradient>
-<linearGradient id="s${id}" x1="0" x2="1"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".5" stop-color="#fff" stop-opacity=".85"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
-<filter id="g${id}" x="-20%" y="-120%" width="140%" height="340%"><feGaussianBlur stdDeviation="2.2"/></filter>
-<clipPath id="c${id}"><rect x="2" y="3" width="${lit ? end : 0}" height="${H - 6}"/></clipPath></defs>
-<style>.glow{animation:breathe 2.8s ease-in-out infinite}.sweep{animation:sweep 2.4s ease-in-out infinite}
-@keyframes breathe{0%,100%{opacity:.45}50%{opacity:.9}}@keyframes sweep{0%{transform:translateX(-40px)}100%{transform:translateX(${W}px)}}
-@media (prefers-reduced-motion:reduce){.glow,.sweep{animation:none}}</style>
-<rect x=".5" y=".5" width="${W - 1}" height="${H - 1}" rx="4" fill="#07061a" stroke="${hot ? '#ff6b6b' : '#c9c8d9'}" stroke-opacity=".28"/>
-${lit ? `<g class="glow" filter="url(#g${id})"><rect x="2" y="3" width="${end}" height="${H - 6}" rx="2" fill="${c1}" fill-opacity=".9"/></g>` : ''}
-${rects}
-<g clip-path="url(#c${id})"><rect class="sweep" x="0" y="2" width="36" height="${H - 4}" fill="url(#s${id})"/></g>
+export const meterSvg = (o: { p: number; from: number; tone: Tone; accent: string; id: string; w: number; h: number; tick?: number }) => {
+  const { base, light } = toneColors(o.tone, o.accent)
+  const pad = 4
+  const H = o.h + pad * 2
+  const fw = (Math.max(0, Math.min(100, o.p)) / 100) * o.w
+  const start = o.p > 0 ? Math.max(0, Math.min(1, o.from / Math.max(o.p, 0.01))) : 1
+  const r = o.h / 2
+  const tick = o.tick === undefined ? '' : `<rect x="${((o.tick / 100) * o.w).toFixed(1)}" y="1" width="1" height="${H - 2}" fill="#fff" fill-opacity=".28"/>`
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${o.w} ${H}" width="${o.w}" height="${H}">
+<defs><linearGradient id="f${o.id}" x1="0" x2="1"><stop offset="0" stop-color="${base}" stop-opacity=".3"/><stop offset=".55" stop-color="${base}"/><stop offset="1" stop-color="${light}"/></linearGradient>
+<filter id="g${o.id}" x="-10%" y="-200%" width="120%" height="500%"><feGaussianBlur stdDeviation="3"/></filter>
+<filter id="e${o.id}" x="-400%" y="-100%" width="900%" height="300%"><feGaussianBlur stdDeviation="2"/></filter></defs>
+<style>.grow{transform-origin:0 0;animation:grow .7s cubic-bezier(.22,1,.36,1) both}.edge{animation:edge .7s cubic-bezier(.22,1,.36,1) both}
+@keyframes grow{from{transform:scaleX(${start.toFixed(3)})}}@keyframes edge{from{transform:translateX(${(fw * start - fw).toFixed(1)}px)}}
+.breathe{animation:breathe 2.4s ease-in-out infinite}@keyframes breathe{0%,100%{opacity:.35}50%{opacity:.85}}
+@media (prefers-reduced-motion:reduce){.grow,.edge,.breathe{animation:none}}</style>
+<rect x="0" y="${pad}" width="${o.w}" height="${o.h}" rx="${r}" fill="#fff" fill-opacity=".07"/>
+${fw > 0 ? `<g class="grow"><rect x="0" y="${pad}" width="${fw.toFixed(1)}" height="${o.h}" rx="${r}" fill="${base}" fill-opacity=".4" filter="url(#g${o.id})"${o.tone === 'crit' ? ' class="breathe"' : ''}/>
+<rect x="0" y="${pad}" width="${fw.toFixed(1)}" height="${o.h}" rx="${r}" fill="url(#f${o.id})"/></g>
+<g class="edge"><rect x="${(fw - 2).toFixed(1)}" y="${pad - 2}" width="2" height="${o.h + 4}" rx="1" fill="${base}" filter="url(#e${o.id})"/><rect x="${(fw - 2).toFixed(1)}" y="${pad - 2}" width="2" height="${o.h + 4}" rx="1" fill="#fff" fill-opacity=".92"/></g>` : ''}${tick}
 </svg>`
 }
 
@@ -148,6 +169,8 @@ export const left = (resetsAt: string | undefined, now: number) => {
 
 export const toSnapshot = (context: SessionContextUsage, limits: SessionRateLimit[]): Snapshot => ({
   context: context.percent,
+  tokens: context.tokens,
+  window: context.window,
   meters: limits
     .map((l): Meter => ({ kind: l.kind, percent: Math.round(l.percentUsed), resetsAt: l.resetsAt }))
     .sort((a, b) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind)),
@@ -261,6 +284,13 @@ async function resume($: EngineInterface, send: boolean) {
 }
 
 async function refresh($: EngineInterface, snap: Snapshot) {
+  const old = await read($, snapshot)
+  if (old) {
+    const was: Record<string, number> = {}
+    if (old.context !== undefined) was.ctx = old.context
+    for (const m of old.meters) was[m.kind] = m.percent
+    await update($, previous, () => was)
+  }
   await update($, snapshot, () => snap)
   const at = await $.clock.now()
   await update($, trails, prev => {
@@ -383,7 +413,10 @@ export const register: Register = on => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const snap = await read($, snapshot)
     if (e.props.hasSurvey || snap === null || (await read($, isHidden))) return next(e)
-    const { Box, Text, Button, Progress } = $.ui.resolve(e)
+    const ui = $.ui.resolve(e)
+    const { Box, Text, Button } = ui
+    // The terminal has no Svg; there the glyph bar is drawn.
+    const Svg = e.surface !== 'terminal' && 'Svg' in ui ? ui.Svg : undefined
 
     if (snap.context === undefined && snap.meters.length === 0) {
       return <Box key="wait"><Text dimColor>usage · waiting for the first reading</Text></Box>
@@ -393,35 +426,72 @@ export const register: Register = on => {
     const l = await read($, look)
     const at = await pauseAtOf($)
     const tr = await read($, trails)
-    const col = (p: number) => colorOf(p, l, at)
-    // A graphical surface draws a real bar; the terminal keeps the glyph bar, which reads in any font.
-    const graphical = e.surface !== 'terminal'
-    const hot = (p: number) => p >= Math.min(at - 10, 85)
-    const ui = $.ui.resolve(e)
-    // The terminal has no Svg; there the glyph bar is drawn.
-    const Svg = 'Svg' in ui ? ui.Svg : undefined
-    const meter = (name: string, p: number, color: string) =>
-      graphical && Svg ? (
-        <Box key={`bar-${name}`} flexShrink={0}>
-          <Svg source={powerSvg(p, hot(p), name.replace(/\W/g, ''))} alt={`${name} ${p}%`} width={120} height={18} isInteractive />
+    const was = await read($, previous)
+    const open = await read($, isOpen)
+    const toneFor = (p: number): Tone => (l.theme === 'classic' ? (tone(p) === 'error' ? 'crit' : tone(p) === 'warning' ? 'warn' : 'calm') : toneOf(p, at))
+    const colorFor = (t: Tone) => (t === 'crit' ? 'error' : t === 'warn' ? 'warning' : l.accent)
+
+    type Row = { key: string; label: string; name: string; p: number; reset?: string; detail: string }
+    const rows: Row[] = []
+    if (snap.context !== undefined) {
+      const k = (n: number) => `${Math.round(n / 1000)}k`
+      rows.push({
+        key: 'ctx', label: 'ctx', name: 'Context window', p: snap.context,
+        detail: snap.tokens !== undefined && snap.window ? `${k(snap.tokens)} / ${k(snap.window)} tokens` : `${snap.context}% of the window`,
+      })
+    }
+    for (const m of snap.meters) {
+      const reset = left(m.resetsAt, now)
+      rows.push({
+        key: m.kind, label: labelOf(m.kind),
+        name: m.kind === 'five_hour' ? '5-hour session' : m.kind === 'seven_day' ? 'Weekly' : 'Spend limit',
+        p: m.percent, reset: reset ? reset.replace(/(\d)([hd])(\d)/, '$1$2 $3') : undefined,
+        detail: reset ? `resets in ${reset.replace(/(\d)([hd])(\d)/, '$1$2 $3')}` : '',
+      })
+    }
+    const extra = (r: Row) => {
+      const m = snap.meters.find(x => x.kind === r.key)
+      if (!m || held) return undefined
+      const f = forecast(m, tr[m.kind], at, now)
+      if (f !== undefined) return `${at}% in ${span(f, now)}`
+      const pc = m.kind === 'seven_day' ? pace(m, now) : undefined
+      return pc !== undefined && pc >= 10 ? `+${pc} pace` : undefined
+    }
+    // (not named h: that is the JSX factory)
+    const track = (r: Row, w: number, thick: number, tick?: number) => {
+      const t = toneFor(r.p)
+      if (!Svg) return <Text key={`bar-${r.key}`} color={colorFor(t)}>{bar(r.p)}</Text>
+      return (
+        <Box key={`bar-${r.key}`} flexShrink={0}>
+          <Svg
+            source={meterSvg({ p: r.p, from: was[r.key] ?? 0, tone: t, accent: l.accent, id: `${r.key}${w}`, w, h: thick, tick })}
+            alt={`${r.name} ${r.p}%`}
+            width={w}
+            height={thick + 8}
+            isInteractive
+          />
         </Box>
-      ) : graphical ? (
-        <Box key={`bar-${name}`} width={WIDTH + 2} flexShrink={0}>
-          <Progress label={`${name} ${p}%`} value={Math.min(p, 100)} max={100} valueText={`${p}%`} color={color} />
-        </Box>
-      ) : (
-        <Text key={`bar-${name}`} color={color}>{bar(p)}</Text>
       )
+    }
+    // Value text: calm stays plain; amber and coral color it, add a dot, and coral is bolder.
+    const value = (r: Row) => {
+      const t = toneFor(r.p)
+      return (
+        <Box key={`val-${r.key}`} flexDirection="row" gap={1} flexShrink={0}>
+          {t !== 'calm' ? <Text color={colorFor(t)}>●</Text> : null}
+          <Text bold color={t === 'calm' ? undefined : colorFor(t)}>{r.p}%</Text>
+        </Box>
+      )
+    }
 
     if (l.compact) {
       return (
         <Box key="compact" flexDirection="row" columnGap={2} alignItems="center">
           {held ? <Text color="error" bold>⏸</Text> : null}
-          {snap.context !== undefined ? <Text key="ctx" dimColor>ctx {snap.context}%</Text> : null}
-          {snap.meters.map(m => (
-            <Box key={m.kind} flexDirection="row" gap={1}>
-              <Text dimColor>{labelOf(m.kind)}</Text>
-              <Text color={col(m.percent)} bold>{m.percent}%</Text>
+          {rows.map(r => (
+            <Box key={r.key} flexDirection="row" gap={1}>
+              <Text dimColor>{r.label}</Text>
+              {value(r)}
             </Box>
           ))}
           {held ? <Button key="resume" label="Resume" onPress={() => void resume($, true)} /> : null}
@@ -429,45 +499,54 @@ export const register: Register = on => {
       )
     }
 
-    const parts = []
-    if (held) {
-      parts.push(
-        <Box key="paused" flexDirection="row" gap={1}>
-          <Text color="error" bold>⏸ paused</Text>
-          <Text dimColor>{held.auto ? `continues in ${left(held.resetsAt, now)}` : '/usage-band resume'}</Text>
-        </Box>,
+    // Narrow bands keep the values and drop the tracks.
+    const narrow = e.props.bodyColumns < 60
+    const trackW = Math.max(60, Math.min(160, Math.floor(((e.props.bodyColumns - 24) / Math.max(1, rows.length)) * 4)))
+    const cells = rows.map(r => {
+      const x = extra(r)
+      return (
+        <Box key={r.key} flexDirection="row" gap={1} alignItems="center" flexGrow={1}>
+          <Text dimColor>{r.label}</Text>
+          {narrow ? null : track(r, trackW, 4)}
+          {value(r)}
+          {r.reset ? <Text dimColor>↻ {r.reset}</Text> : null}
+          {x ? <Text color="warning">{x}</Text> : null}
+        </Box>
       )
-    }
-    if (snap.context !== undefined) {
-      parts.push(
-        <Box key="ctx" flexDirection="row" gap={1}>
-          <Text dimColor>ctx</Text>
-          {meter('ctx', snap.context, l.theme === 'classic' ? tone(snap.context) : l.accent)}
-          <Text bold>{snap.context}%</Text>
-        </Box>,
-      )
-    }
-    for (const m of snap.meters) {
-      const reset = left(m.resetsAt, now)
-      const f = held ? undefined : forecast(m, tr[m.kind], at, now)
-      const pc = m.kind === 'seven_day' ? pace(m, now) : undefined
-      parts.push(
-        <Box key={m.kind} flexDirection="row" gap={1}>
-          <Text dimColor>{labelOf(m.kind)}</Text>
-          {meter(labelOf(m.kind), m.percent, col(m.percent))}
-          <Text bold>{m.percent}%</Text>
-          {reset ? <Text dimColor>↻ {reset}</Text> : null}
-          {f !== undefined ? <Text color="warning">{at}% in {span(f, now)}</Text> : null}
-          {f === undefined && pc !== undefined && pc >= 10 ? <Text color="warning">+{pc} pace</Text> : null}
-        </Box>,
-      )
-    }
+    })
+
+    const panel = open ? (
+      <Box key="panel" flexDirection="column" gap={1} paddingBottom={1}>
+        {rows.map(r => (
+          <Box key={`d-${r.key}`} flexDirection="column">
+            <Box flexDirection="row" gap={2}>
+              <Text>{r.name}</Text>
+              <Text dimColor>{r.label}</Text>
+              <Box flexGrow={1} />
+              <Text dimColor>{r.detail}</Text>
+              {value(r)}
+            </Box>
+            {track(r, Math.max(160, Math.min(560, e.props.bodyColumns * 6)), 8, WARN_AT)}
+          </Box>
+        ))}
+      </Box>
+    ) : null
 
     return (
-      <Box flexDirection="row" flexWrap="wrap" columnGap={2} alignItems="center">
-        {parts}
-        {held ? <Button key="resume" label="Resume" onPress={() => void resume($, true)} /> : null}
-        <Button key="hide" label="Hide" onPress={() => update($, isHidden, () => true)} />
+      <Box key="band" flexDirection="column">
+        {panel}
+        <Box key="row" flexDirection="row" columnGap={3} alignItems="center">
+          {held ? (
+            <Box key="paused" flexDirection="row" gap={1}>
+              <Text color="error" bold>⏸ paused</Text>
+              <Text dimColor>{held.auto ? `continues in ${left(held.resetsAt, now)}` : '/usage-band resume'}</Text>
+            </Box>
+          ) : null}
+          {cells}
+          {held ? <Button key="resume" label="Resume" onPress={() => void resume($, true)} /> : null}
+          <Button key="details" label={open ? 'Less' : 'Details'} plain onPress={() => update($, isOpen, o => !o)} />
+          <Button key="hide" label="Hide" onPress={() => update($, isHidden, () => true)} />
+        </Box>
       </Box>
     )
   })

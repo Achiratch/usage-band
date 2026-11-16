@@ -1,5 +1,5 @@
 export type Meter = { kind: string; percent: number; resetsAt?: string }
-export type Snapshot = { context?: number; meters: Meter[] }
+export type Snapshot = { context?: number; tokens?: number; window?: number; meters: Meter[] }
 /** kind → "<threshold>@<resetsAt>" of the last toast, so a window warns once per reset */
 export type Warned = Record<string, string>
 /** why work is held: the window that crossed the threshold; `auto` when a reset timer will continue it */
@@ -22,6 +22,10 @@ declare module 'claude-code' {
       trails: Record<string, Trail>
       /** the store's look, mirrored here so a change redraws the band */
       look: Look
+      /** whether the detail panel above the band is open */
+      isOpen: boolean
+      /** each meter's previous reading, so a new one glides from it */
+      previous: Record<string, number>
     }
   }
 }
