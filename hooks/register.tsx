@@ -127,7 +127,7 @@ export const toneColors = (t: Tone, accent: string) =>
  * The fill glides from the last reading (`from`); coral breathes. Motion stops
  * under reduced motion. `tick` draws the amber line on the expanded track.
  */
-export const meterSvg = (o: { p: number; from: number; tone: Tone; accent: string; id: string; w: number; h: number; tick?: number }) => {
+export const meterSvg = (o: { p: number; from: number; tone: Tone; accent: string; id: string; w: number; h: number; tick?: number; stretch?: boolean }) => {
   const { base, light } = toneColors(o.tone, o.accent)
   const pad = 4
   const H = o.h + pad * 2
@@ -135,7 +135,7 @@ export const meterSvg = (o: { p: number; from: number; tone: Tone; accent: strin
   const start = o.p > 0 ? Math.max(0, Math.min(1, o.from / Math.max(o.p, 0.01))) : 1
   const r = o.h / 2
   const tick = o.tick === undefined ? '' : `<rect x="${((o.tick / 100) * o.w).toFixed(1)}" y="1" width="1" height="${H - 2}" fill="#fff" fill-opacity=".28"/>`
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${o.w} ${H}" width="${o.w}" height="${H}">
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${o.w} ${H}" width="${o.w}" height="${H}"${o.stretch ? ' preserveAspectRatio="none"' : ''}>
 <defs><linearGradient id="f${o.id}" x1="0" x2="1"><stop offset="0" stop-color="${base}" stop-opacity=".3"/><stop offset=".55" stop-color="${base}"/><stop offset="1" stop-color="${light}"/></linearGradient>
 <filter id="g${o.id}" x="-10%" y="-200%" width="120%" height="500%"><feGaussianBlur stdDeviation="3"/></filter>
 <filter id="e${o.id}" x="-400%" y="-100%" width="900%" height="300%"><feGaussianBlur stdDeviation="2"/></filter></defs>
@@ -283,6 +283,16 @@ async function resume($: EngineInterface, send: boolean) {
   return true
 }
 
+/**
+ * The status line repeats the band in one line, so it shows only while the band is hidden
+ * (or before it has anything to draw); with the band on screen it would sit right under it.
+ */
+async function syncStatus($: EngineInterface, text?: string) {
+  const snap = await read($, snapshot)
+  const line = text ?? (snap ? summary(snap, await $.clock.now()) : '')
+  $.ui.status((await read($, isHidden)) && line !== '' ? line : undefined)
+}
+
 async function refresh($: EngineInterface, snap: Snapshot) {
   const old = await read($, snapshot)
   if (old) {
@@ -299,7 +309,7 @@ async function refresh($: EngineInterface, snap: Snapshot) {
     return next
   })
   const text = summary(snap, await $.clock.now())
-  $.ui.status(text === '' ? undefined : text)
+  await syncStatus($, text)
 
   const w = await read($, warned)
   for (const m of snap.meters) {
@@ -407,6 +417,7 @@ export const register: Register = on => {
     }
 
     const hidden = await update($, isHidden, h => !h)
+    await syncStatus($)
     return { text: hidden ? 'Usage band hidden. Run /usage-band to show it again.' : 'Usage band shown.' }
   })
 
@@ -459,15 +470,15 @@ export const register: Register = on => {
       return pc !== undefined && pc >= 10 ? `+${pc} pace` : undefined
     }
     // (not named h: that is the JSX factory)
-    const track = (r: Row, w: number, thick: number, tick?: number) => {
+    const track = (r: Row, w: number, thick: number, tick?: number, stretch = false) => {
       const t = toneFor(r.p)
       if (!Svg) return <Text key={`bar-${r.key}`} color={colorFor(t)}>{bar(r.p)}</Text>
       return (
-        <Box key={`bar-${r.key}`} flexShrink={0}>
+        <Box key={`bar-${r.key}`} flexShrink={stretch ? 1 : 0} flexGrow={stretch ? 1 : 0}>
           <Svg
-            source={meterSvg({ p: r.p, from: was[r.key] ?? 0, tone: t, accent: l.accent, id: `${r.key}${w}`, w, h: thick, tick })}
+            source={meterSvg({ p: r.p, from: was[r.key] ?? 0, tone: t, accent: l.accent, id: `${r.key}${w}`, w, h: thick, tick, stretch })}
             alt={`${r.name} ${r.p}%`}
-            width={w}
+            width={stretch ? undefined : w}
             height={thick + 8}
             isInteractive
           />
@@ -502,7 +513,7 @@ export const register: Register = on => {
 
     // Narrow bands keep the values and drop the tracks.
     const narrow = e.props.bodyColumns < 60
-    const trackW = Math.max(60, Math.min(160, Math.floor(((e.props.bodyColumns - 24) / Math.max(1, rows.length)) * 4)))
+    const trackW = Math.max(56, Math.min(110, Math.floor(((e.props.bodyColumns - 40) / Math.max(1, rows.length)) * 3)))
     const cells = rows.map(r => {
       const x = extra(r)
       return (
@@ -531,7 +542,8 @@ export const register: Register = on => {
               <Text dimColor tabular>{r.detail}</Text>
               {value(r)}
             </Box>
-            {track(r, Math.max(160, Math.min(1100, e.props.bodyColumns * 7)), 8, WARN_AT)}
+            {/* Drawn wide and stretched to the panel's width, so it spans it at any size. */}
+            {track(r, 1600, 8, WARN_AT, true)}
           </Box>
         ))}
       </Box>
@@ -555,7 +567,14 @@ export const register: Register = on => {
           {cells}
           <Box key="actions" flexDirection="row" gap={1} flexShrink={0}>
             <Button key="details" label={open ? 'Less' : 'Details'} plain onPress={() => update($, isOpen, o => !o)} />
-            <Button key="hide" label="Hide" onPress={() => update($, isHidden, () => true)} />
+            <Button
+              key="hide"
+              label="Hide"
+              onPress={async () => {
+                await update($, isHidden, () => true)
+                await syncStatus($)
+              }}
+            />
           </Box>
         </Box>
       </Box>

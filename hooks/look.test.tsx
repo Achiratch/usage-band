@@ -165,3 +165,20 @@ test('details: a million-token window reads as 1M', async ($, on) => {
   await ui.press({ key: 'details' })
   expect((await ui.find({ key: 'panel' }))?.text).toContain('831k / 1M tokens')
 })
+
+test('status line: off while the band shows, the one-line summary while it is hidden', async ($, on) => {
+  const lines: (string | undefined)[] = []
+  on('ui.status', ($, e) => { lines.push(e.text); return { value: undefined } as never })
+  on('ui.toast', () => ({ value: undefined }) as never)
+  on('session.measure', ($, e) => ({ changed: e.changed }))
+  on('process.spawn', async function* () { return { value: { code: 0 } } as never })
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+  mock.store(on)
+  mock.clock(on, { now: NOW })
+  await $.session.measure(measure(41, 18))
+  expect(lines.at(-1)).toBe(undefined)
+  await say($, '')
+  expect(lines.at(-1)).toContain('5h')
+  await say($, '')
+  expect(lines.at(-1)).toBe(undefined)
+})
