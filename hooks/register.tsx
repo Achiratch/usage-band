@@ -506,7 +506,7 @@ export const register: Register = on => {
     const cells = rows.map(r => {
       const x = extra(r)
       return (
-        <Box key={r.key} flexDirection="row" gap={1} alignItems="center" flexGrow={1}>
+        <Box key={r.key} flexDirection="row" gap={1} alignItems="center" flexGrow={1} flexShrink={0}>
           <Text dimColor mono size="caption">{r.label}</Text>
           {narrow ? null : track(r, trackW, 4)}
           {value(r)}
@@ -537,20 +537,26 @@ export const register: Register = on => {
       </Box>
     ) : null
 
+    // A pause gets its own line with Resume, so the meters' row never crowds.
+    const pausedRow = held ? (
+      <Box key="paused" flexDirection="row" gap={1} alignItems="center">
+        <Text color="error" bold>⏸ paused</Text>
+        <Text dimColor>{held.auto ? `continues in ${left(held.resetsAt, now)}` : '/usage-band resume'}</Text>
+        <Button key="resume" label="Resume" onPress={() => void resume($, true)} />
+      </Box>
+    ) : null
+
     return (
-      <Box key="band" flexDirection="column">
+      <Box key="band" flexDirection="column" rowGap={1}>
         {panel}
-        <Box key="row" flexDirection="row" columnGap={3} alignItems="center">
-          {held ? (
-            <Box key="paused" flexDirection="row" gap={1}>
-              <Text color="error" bold>⏸ paused</Text>
-              <Text dimColor>{held.auto ? `continues in ${left(held.resetsAt, now)}` : '/usage-band resume'}</Text>
-            </Box>
-          ) : null}
+        {pausedRow}
+        {/* Cells wrap to a second line when the band is too narrow, rather than overlap. */}
+        <Box key="row" flexDirection="row" flexWrap="wrap" columnGap={3} rowGap={1} alignItems="center">
           {cells}
-          {held ? <Button key="resume" label="Resume" onPress={() => void resume($, true)} /> : null}
-          <Button key="details" label={open ? 'Less' : 'Details'} plain onPress={() => update($, isOpen, o => !o)} />
-          <Button key="hide" label="Hide" onPress={() => update($, isHidden, () => true)} />
+          <Box key="actions" flexDirection="row" gap={1} flexShrink={0}>
+            <Button key="details" label={open ? 'Less' : 'Details'} plain onPress={() => update($, isOpen, o => !o)} />
+            <Button key="hide" label="Hide" onPress={() => update($, isHidden, () => true)} />
+          </Box>
         </Box>
       </Box>
     )

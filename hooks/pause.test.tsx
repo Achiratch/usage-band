@@ -128,3 +128,17 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(await ui.find({ key: 'paused' })).toBe(undefined)
   })
 }
+
+test('a pause sits on its own line above the meters, with Resume beside it', async ($, on) => {
+  world(on)
+  on('ui.render', ($, e) => { const { Box } = $.ui.resolve(e); return <Box key="engine" /> })
+  await $.session.measure(measure(96, 40))
+  const ui = await $.ui.mount({
+    plugin: 'usage-band', surface: 'desktop', component: 'AbovePrompt',
+    props: { hasSurvey: false, isWorking: false, maxRows: 3, bodyColumns: 120, scroll: { offset: 0, bodyRows: 3 }, view: {} },
+  })
+  const paused = await ui.find({ key: 'paused' })
+  expect(paused?.text).toContain('continues in')
+  expect(paused?.text).toContain('Resume')
+  expect((await ui.find({ key: 'row' }))?.text).not.toContain('paused')
+})
