@@ -434,7 +434,8 @@ export const register: Register = on => {
     type Row = { key: string; label: string; name: string; p: number; reset?: string; detail: string }
     const rows: Row[] = []
     if (snap.context !== undefined) {
-      const k = (n: number) => `${Math.round(n / 1000)}k`
+      // 831k, 1M, 1.2M
+      const k = (n: number) => (n >= 1_000_000 ? `${Number((n / 1_000_000).toFixed(1))}M` : `${Math.round(n / 1000)}k`)
       rows.push({
         key: 'ctx', label: 'ctx', name: 'Context window', p: snap.context,
         detail: snap.tokens !== undefined && snap.window ? `${k(snap.tokens)} / ${k(snap.window)} tokens` : `${snap.context}% of the window`,
@@ -479,7 +480,7 @@ export const register: Register = on => {
       return (
         <Box key={`val-${r.key}`} flexDirection="row" gap={1} flexShrink={0}>
           {t !== 'calm' ? <Text color={colorFor(t)}>●</Text> : null}
-          <Text bold color={t === 'calm' ? undefined : colorFor(t)}>{r.p}%</Text>
+          <Text bold tabular color={t === 'calm' ? undefined : colorFor(t)}>{r.p}%</Text>
         </Box>
       )
     }
@@ -506,11 +507,15 @@ export const register: Register = on => {
       const x = extra(r)
       return (
         <Box key={r.key} flexDirection="row" gap={1} alignItems="center" flexGrow={1}>
-          <Text dimColor>{r.label}</Text>
+          <Text dimColor mono size="caption">{r.label}</Text>
           {narrow ? null : track(r, trackW, 4)}
           {value(r)}
-          {r.reset ? <Text dimColor>↻ {r.reset}</Text> : null}
-          {x ? <Text color="warning">{x}</Text> : null}
+          {r.reset ? (
+            <Box key={`reset-${r.key}`} flexShrink={0}>
+              <Text dimColor size="caption" tabular wrap="truncate">↻ {r.reset}</Text>
+            </Box>
+          ) : null}
+          {x ? <Text color="warning" size="caption" wrap="truncate">{x}</Text> : null}
         </Box>
       )
     })
@@ -521,12 +526,12 @@ export const register: Register = on => {
           <Box key={`d-${r.key}`} flexDirection="column">
             <Box flexDirection="row" gap={2}>
               <Text>{r.name}</Text>
-              <Text dimColor>{r.label}</Text>
+              <Text dimColor mono size="caption">{r.label}</Text>
               <Box flexGrow={1} />
-              <Text dimColor>{r.detail}</Text>
+              <Text dimColor tabular>{r.detail}</Text>
               {value(r)}
             </Box>
-            {track(r, Math.max(160, Math.min(560, e.props.bodyColumns * 6)), 8, WARN_AT)}
+            {track(r, Math.max(160, Math.min(1100, e.props.bodyColumns * 7)), 8, WARN_AT)}
           </Box>
         ))}
       </Box>

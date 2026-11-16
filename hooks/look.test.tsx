@@ -157,3 +157,11 @@ test('details: the band opens a panel with names, tokens and reset times', async
   expect(panel?.text).toContain('80k / 200k tokens')
   expect(panel?.text).toContain('resets in 3h 00m')
 })
+
+test('details: a million-token window reads as 1M', async ($, on) => {
+  world(on)
+  await $.session.measure({ ...measure(41, 18), context: { window: 1_000_000, tokens: 831_000, percent: 83 } })
+  const ui = await $.ui.mount({ plugin: 'usage-band', surface: 'desktop', component: 'AbovePrompt', props: PROPS })
+  await ui.press({ key: 'details' })
+  expect((await ui.find({ key: 'panel' }))?.text).toContain('831k / 1M tokens')
+})
